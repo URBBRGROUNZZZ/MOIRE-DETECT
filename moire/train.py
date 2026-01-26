@@ -63,6 +63,8 @@ def evaluate_tiled(
     window_sizes: List[int],
     stride_ratio: float,
     tile_batch: int,
+    tile_reduce: str,
+    tile_topk: int,
     early_stop_threshold: float | None,
     limit: int,
 ) -> Tuple[List[float], List[int]]:
@@ -88,6 +90,8 @@ def evaluate_tiled(
             window_sizes=window_sizes,
             stride_ratio=stride_ratio,
             tile_batch=tile_batch,
+            tile_reduce=tile_reduce,
+            tile_topk=tile_topk,
             early_stop_threshold=early_stop_threshold,
         )
         y_prob.append(float(prob))
@@ -204,6 +208,10 @@ def main() -> None:
     ap.add_argument("--gabor-gamma", type=float, default=0.5)
     ap.add_argument("--gabor-psi", type=float, default=0.0)
     ap.add_argument("--gabor-scale-init", type=float, default=0.0)
+    ap.add_argument("--freq-attn", dest="freq_attn_enabled", action="store_true", default=True)
+    ap.add_argument("--no-freq-attn", dest="freq_attn_enabled", action="store_false")
+    ap.add_argument("--freq-attn-low-freq-ratio", type=float, default=0.2)
+    ap.add_argument("--freq-attn-scale-init", type=float, default=0.1)
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--num-workers", type=int, default=0)
@@ -216,6 +224,8 @@ def main() -> None:
     ap.add_argument("--val-mode", type=str, default="tiled", choices=["tiled", "crop"])
     ap.add_argument("--val-window-sizes", type=str, default="224,320,448")
     ap.add_argument("--val-stride-ratio", type=float, default=0.5)
+    ap.add_argument("--val-tile-reduce", type=str, default="max", choices=["max", "mean", "topk_mean", "p95"])
+    ap.add_argument("--val-tile-topk", type=int, default=5)
     ap.add_argument(
         "--val-threshold",
         type=float,
@@ -304,6 +314,9 @@ def main() -> None:
         gabor_gamma=float(args.gabor_gamma),
         gabor_psi=float(args.gabor_psi),
         gabor_scale_init=float(args.gabor_scale_init),
+        freq_attn_enabled=bool(args.freq_attn_enabled),
+        freq_attn_low_freq_ratio=float(args.freq_attn_low_freq_ratio),
+        freq_attn_scale_init=float(args.freq_attn_scale_init),
     )
     model = ViTFFTClassifier(model_cfg).to(device)
 
@@ -342,6 +355,9 @@ def main() -> None:
         gabor_gamma=float(model_cfg.gabor_gamma) if model_cfg.gabor_enabled else 0.0,
         gabor_psi=float(model_cfg.gabor_psi) if model_cfg.gabor_enabled else 0.0,
         gabor_scale_init=float(model_cfg.gabor_scale_init) if model_cfg.gabor_enabled else 0.0,
+        freq_attn_enabled=bool(model_cfg.freq_attn_enabled),
+        freq_attn_low_freq_ratio=float(model_cfg.freq_attn_low_freq_ratio),
+        freq_attn_scale_init=float(model_cfg.freq_attn_scale_init),
     )
     write_json(save_dir / "config.json", {"train": vars(args), "model": asdict(model_cfg), "data": asdict(data_cfg)})
 
@@ -381,6 +397,8 @@ def main() -> None:
                 window_sizes=window_sizes,
                 stride_ratio=args.val_stride_ratio,
                 tile_batch=args.val_tile_batch,
+                tile_reduce=args.val_tile_reduce,
+                tile_topk=args.val_tile_topk,
                 early_stop_threshold=args.val_early_stop_threshold,
                 limit=args.val_limit,
             )

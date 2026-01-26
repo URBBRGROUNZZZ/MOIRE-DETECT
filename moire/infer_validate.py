@@ -29,6 +29,8 @@ def main() -> None:
     ap.add_argument("--device", type=str, default="auto")
     ap.add_argument("--window-sizes", type=str, default="224,320,448,512")
     ap.add_argument("--stride-ratio", type=float, default=0.5)
+    ap.add_argument("--tile-reduce", type=str, default="max", choices=["max", "mean", "topk_mean", "p95"])
+    ap.add_argument("--tile-topk", type=int, default=5)
     ap.add_argument("--threshold", type=float, default=0.5, help="classification threshold for metrics")
     ap.add_argument(
         "--early-stop-threshold",
@@ -71,6 +73,9 @@ def main() -> None:
         gabor_gamma=float(meta.get("gabor_gamma", 0.0) or 0.0),
         gabor_psi=float(meta.get("gabor_psi", 0.0) or 0.0),
         gabor_scale_init=float(meta.get("gabor_scale_init", 0.0) or 0.0),
+        freq_attn_enabled=bool(meta.get("freq_attn_enabled", False)),
+        freq_attn_low_freq_ratio=float(meta.get("freq_attn_low_freq_ratio", 0.0) or 0.0),
+        freq_attn_scale_init=float(meta.get("freq_attn_scale_init", 0.0) or 0.0),
     )
     model = ViTFFTClassifier(model_cfg)
     model.load_state_dict(ckpt["state_dict"], strict=True)
@@ -101,6 +106,8 @@ def main() -> None:
             window_sizes=window_sizes,
             stride_ratio=args.stride_ratio,
             tile_batch=args.tile_batch,
+            tile_reduce=args.tile_reduce,
+            tile_topk=args.tile_topk,
             early_stop_threshold=(early_stop_threshold if args.early_stop else None),
         )
         y_true.append(int(y))

@@ -21,6 +21,22 @@ def _fftshift2(x: torch.Tensor) -> torch.Tensor:
     return torch.roll(torch.roll(x, shifts=h // 2, dims=-2), shifts=w // 2, dims=-1)
 
 
+def _ifftshift2(x: torch.Tensor) -> torch.Tensor:
+    h = x.shape[-2]
+    w = x.shape[-1]
+    return torch.roll(torch.roll(x, shifts=-(h // 2), dims=-2), shifts=-(w // 2), dims=-1)
+
+
+def _build_highpass_mask(h: int, w: int, low_freq_ratio: float) -> torch.Tensor:
+    low_freq_ratio = max(0.0, min(float(low_freq_ratio), 1.0))
+    yy, xx = torch.meshgrid(torch.arange(h), torch.arange(w))
+    cy = h // 2
+    cx = w // 2
+    radius = torch.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    cutoff = (min(h, w) * low_freq_ratio) / 2.0
+    return (radius >= cutoff).to(dtype=torch.float32)
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     model_name: str = "deit_small_patch16_224"
@@ -44,6 +60,10 @@ class ModelConfig:
     gabor_gamma: float = 0.5
     gabor_psi: float = 0.0
     gabor_scale_init: float = 0.0
+    # Frequency-guided attention (optional).
+    freq_attn_enabled: bool = True
+    freq_attn_low_freq_ratio: float = 0.2
+    freq_attn_scale_init: float = 0.1
 
 
 class FFTBranch(nn.Module):
@@ -195,6 +215,11 @@ class ViTFFTClassifier(nn.Module):
             raise RuntimeError(f"Unable to infer feature dim for model {cfg.model_name}")
 
         self.freq_branch = FFTBranch(cfg.freq_dim)
+        self.freq_attn_enabled = bool(cfg.freq_attn_enabled)
+        if self.freq_attn_enabled:
+            mask = _build_highpass_mask(int(cfg.freq_size), int(cfg.freq_size), float(cfg.freq_attn_low_freq_ratio))
+            self.register_buffer("freq_attn_mask", mask[None, None, :, :], persistent=False)
+            self.freq_attn_scale = nn.Parameter(torch.tensor(float(cfg.freq_attn_scale_init), dtype=torch.float32))
         self.srm_enabled = bool(cfg.srm_enabled)
         if self.srm_enabled:
             kernels = _build_srm_kernels_5x5(int(cfg.srm_kernels))  # [K,5,5]
@@ -273,7 +298,22 @@ class ViTFFTClassifier(nn.Module):
         mag = mag / (mag.std(dim=(-2, -1), keepdim=True) + 1e-6)
         return mag
 
-    def _vit_features(self, x: torch.Tensor) -> torch.Tensor:
+    def _compute_freq_attn_map(self, x_norm: torch.Tensor) -> torch.Tensor:
+        # Use high-pass filtered inverse FFT magnitude as a spatial attention hint.
+        x = self._denormalize_to_unit(x_norm)
+        x = F.interpolate(x, size=(self.cfg.freq_size, self.cfg.freq_size), mode="bilinear", align_corners=False)
+        gray = (0.2989 * x[:, 0] + 0.5870 * x[:, 1] + 0.1140 * x[:, 2]).unsqueeze(1)  # [B,1,H,W]
+
+        fft = torch.fft.fft2(gray, dim=(-2, -1))
+        fft = _fftshift2(fft) * self.freq_attn_mask
+        fft = _ifftshift2(fft)
+        spatial = torch.fft.ifft2(fft, dim=(-2, -1))
+        attn = torch.abs(spatial)
+        attn = attn - attn.amin(dim=(-2, -1), keepdim=True)
+        attn = attn / (attn.amax(dim=(-2, -1), keepdim=True) + 1e-6)
+        return attn
+
+    def _vit_features(self, x: torch.Tensor, freq_attn_map: torch.Tensor | None = None) -> torch.Tensor:
         """
         Return a [B,C] feature vector for both ViT-like backbones (token outputs) and CNN backbones
         (spatial feature maps). Name kept for backward compatibility.
@@ -282,6 +322,17 @@ class ViTFFTClassifier(nn.Module):
         if isinstance(feats, (tuple, list)):
             feats = feats[0]
         if getattr(feats, "ndim", 0) == 3:
+            if freq_attn_map is not None and feats.shape[1] > 1:
+                n_patches = int(feats.shape[1] - 1)
+                grid = int(math.sqrt(n_patches))
+                if grid * grid == n_patches:
+                    attn = F.adaptive_avg_pool2d(freq_attn_map, (grid, grid))
+                    weights = attn.flatten(1)
+                    weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-6)
+                    patch_tokens = feats[:, 1:]
+                    weighted_patch = (patch_tokens * weights.unsqueeze(-1)).sum(dim=1)
+                    feats = feats.clone()
+                    feats[:, 0] = feats[:, 0] + self.freq_attn_scale * weighted_patch
             # timm VisionTransformer forward_head expects token sequence [B,N,C];
             # passing CLS [B,C] can collapse to [B], so only call it on token sequences.
             if hasattr(self.vit, "forward_head"):
@@ -292,12 +343,18 @@ class ViTFFTClassifier(nn.Module):
             # tokens [B, N, C] -> CLS
             return feats[:, 0]
         if getattr(feats, "ndim", 0) == 4:
+            if freq_attn_map is not None:
+                attn = F.interpolate(
+                    freq_attn_map, size=feats.shape[-2:], mode="bilinear", align_corners=False
+                )
+                feats = feats * (1.0 + self.freq_attn_scale * attn)
             # CNN feature map [B,C,H,W] -> global average pool.
             return feats.mean(dim=(-2, -1))
         return feats  # already [B,C] for many timm models
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        vit_feat = self._vit_features(x)
+        freq_attn_map = self._compute_freq_attn_map(x) if self.freq_attn_enabled else None
+        vit_feat = self._vit_features(x, freq_attn_map=freq_attn_map)
         x_unit = None
         if self.srm_enabled or self.gabor_enabled:
             x_unit = self._denormalize_to_unit(x)

@@ -55,6 +55,9 @@ class CheckpointMeta:
     gabor_gamma: float = 0.0
     gabor_psi: float = 0.0
     gabor_scale_init: float = 0.0
+    freq_attn_enabled: bool = False
+    freq_attn_low_freq_ratio: float = 0.0
+    freq_attn_scale_init: float = 0.0
 
 
 def save_checkpoint(

@@ -168,6 +168,9 @@ def main() -> None:
         gabor_gamma=float(meta.get("gabor_gamma", 0.0) or 0.0),
         gabor_psi=float(meta.get("gabor_psi", 0.0) or 0.0),
         gabor_scale_init=float(meta.get("gabor_scale_init", 0.0) or 0.0),
+        freq_attn_enabled=bool(meta.get("freq_attn_enabled", False)),
+        freq_attn_low_freq_ratio=float(meta.get("freq_attn_low_freq_ratio", 0.0) or 0.0),
+        freq_attn_scale_init=float(meta.get("freq_attn_scale_init", 0.0) or 0.0),
     )
     model = ViTFFTClassifier(model_cfg)
     model.load_state_dict(ckpt["state_dict"], strict=True)

@@ -69,10 +69,13 @@ def max_prob_tiled(
     window_sizes: Sequence[int],
     stride_ratio: float,
     tile_batch: int = 64,
+    tile_reduce: str = "max",
+    tile_topk: int = 5,
     early_stop_threshold: float | None = None,
 ) -> float:
     W, H = im.size
     best = 0.0
+    probs: List[float] = []
     for win in window_sizes:
         stride = int(round(win * stride_ratio))
         xs = generate_positions(W, win, stride)
@@ -88,9 +91,26 @@ def max_prob_tiled(
             batch = torch.stack(tiles[i : i + tile_batch], dim=0).to(device)
             logits = model(batch)
             prob1 = torch.softmax(logits, dim=1)[:, 1]
-            max_in_batch = float(prob1.max().item())
-            if max_in_batch > best:
-                best = max_in_batch
-                if early_stop_threshold is not None and best >= float(early_stop_threshold):
-                    return best
-    return best
+            if tile_reduce == "max":
+                max_in_batch = float(prob1.max().item())
+                if max_in_batch > best:
+                    best = max_in_batch
+                    if early_stop_threshold is not None and best >= float(early_stop_threshold):
+                        return best
+            else:
+                probs.extend(prob1.detach().cpu().numpy().astype(float).tolist())
+    if tile_reduce == "max":
+        return best
+    if not probs:
+        return 0.0
+    p = torch.tensor(probs, dtype=torch.float32)
+    if tile_reduce == "mean":
+        return float(p.mean().item())
+    if tile_reduce == "topk_mean":
+        k = max(1, min(int(tile_topk), int(p.numel())))
+        return float(p.topk(k).values.mean().item())
+    if tile_reduce == "p95":
+        k = int(math.ceil(0.95 * float(p.numel()))) - 1
+        k = max(0, min(k, int(p.numel()) - 1))
+        return float(p.sort().values[k].item())
+    raise ValueError(f"Unknown tile_reduce={tile_reduce}")
