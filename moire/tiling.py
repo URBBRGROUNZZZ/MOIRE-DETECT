@@ -20,7 +20,7 @@ def build_eval_transform(
     resize = int(round(img_size / 0.875))
     return transforms.Compose(
         [
-            transforms.Resize(resize, interpolation=transforms.InterpolationMode.NEAREST),
+            transforms.Resize(resize, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(img_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std),
@@ -56,7 +56,7 @@ def generate_positions(length: int, window: int, stride: int) -> List[int]:
 def crop_tile(im: Image.Image, x0: int, y0: int, w: int, h: int) -> Image.Image:
     W, H = im.size
     if W < w or H < h:
-        return im.resize((w, h), resample=Image.Resampling.NEAREST)
+        return im.resize((w, h), resample=Image.Resampling.BICUBIC)
     return im.crop((x0, y0, x0 + w, y0 + h))
 
 

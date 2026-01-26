@@ -47,11 +47,6 @@ python3.10 -m venv .venv
 - 对大图用多个窗口大小滑动裁剪（例如 `224,320,448,512`），每个 tile 单独推理得到 `P(moire=1)`。
 - 图级概率取所有 tile 的 `max_prob`（只要有一块检测到摩尔纹就判 1），并支持 `threshold` 提前停止加速。
 
-## 预处理与插值策略
-
-- 训练/验证/推理的 resize 统一使用 `nearest`。
-- FFT 分支内部的下采样也使用 `nearest`。
-
 ## 3) 训练（ViT + 频域分支融合）
 
 ```sh
@@ -64,17 +59,6 @@ python3.10 -m venv .venv
 
 默认会用与最终目标一致的 **tiled 验证**（对 `validate/` 大图做多窗口滑动、取最大概率），并据此保存 `best.pt`。如需更快但不一致的验证方式，可显式设置 `--val-mode crop`。
 
-### 高分辨率训练示例（ViT small）
-
-```sh
-.venv/bin/python -m moire.train \
-  --train-dir train --val-dir validate \
-  --model vit_small_patch16_384 --img-size 384 --freq-size 192 \
-  --val-mode tiled --val-window-sizes 384,512,640 \
-  --batch-size 32 \
-  --save-dir runs/vit_small_384_nearest
-```
-
 ## 4) 在 validate 上做多尺度切片推理验证
 
 ```sh
@@ -83,13 +67,4 @@ python3.10 -m venv .venv
   --ckpt runs/exp1/best.pt \\
   --window-sizes 224,320,448,512 \\
   --stride-ratio 0.5 --threshold 0.5
-```
-
-## 5) 对任意文件夹做推理（含子目录）
-
-```sh
-.venv/bin/python -m moire.infer_folder \
-  --input-dir "商户图片测试" \
-  --ckpt runs/vit_small_384_nearest/best.pt \
-  --window-sizes 384,512,640
 ```

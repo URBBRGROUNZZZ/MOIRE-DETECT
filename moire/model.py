@@ -261,7 +261,7 @@ class ViTFFTClassifier(nn.Module):
     def _compute_fft_map(self, x_norm: torch.Tensor) -> torch.Tensor:
         # x_norm: [B,3,H,W] normalized by mean/std; convert back to approx [0,1] for FFT.
         x = self._denormalize_to_unit(x_norm)
-        x = F.interpolate(x, size=(self.cfg.freq_size, self.cfg.freq_size), mode="nearest")
+        x = F.interpolate(x, size=(self.cfg.freq_size, self.cfg.freq_size), mode="bilinear", align_corners=False)
         gray = (0.2989 * x[:, 0] + 0.5870 * x[:, 1] + 0.1140 * x[:, 2]).unsqueeze(1)  # [B,1,H,W]
 
         fft = torch.fft.fft2(gray, dim=(-2, -1))

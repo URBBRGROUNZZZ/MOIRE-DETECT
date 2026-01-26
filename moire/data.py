@@ -56,10 +56,7 @@ def build_transforms(cfg: DataConfig, train: bool) -> transforms.Compose:
     if train:
         t = [
             transforms.RandomResizedCrop(
-                cfg.img_size,
-                scale=(0.6, 1.0),
-                ratio=(0.75, 1.3333333333),
-                interpolation=transforms.InterpolationMode.NEAREST,
+                cfg.img_size, scale=(0.6, 1.0), ratio=(0.75, 1.3333333333)
             ),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.02),
@@ -69,7 +66,7 @@ def build_transforms(cfg: DataConfig, train: bool) -> transforms.Compose:
     else:
         resize = int(round(cfg.img_size / 0.875))
         t = [
-            transforms.Resize(resize, interpolation=transforms.InterpolationMode.NEAREST),
+            transforms.Resize(resize, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(cfg.img_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=cfg.mean, std=cfg.std),
@@ -81,10 +78,7 @@ class PairedTrainTransform:
     def __init__(self, cfg: DataConfig) -> None:
         self.cfg = cfg
         self.crop = transforms.RandomResizedCrop(
-            cfg.img_size,
-            scale=(0.6, 1.0),
-            ratio=(0.75, 1.3333333333),
-            interpolation=transforms.InterpolationMode.NEAREST,
+            cfg.img_size, scale=(0.6, 1.0), ratio=(0.75, 1.3333333333)
         )
         self.color_jitter = transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.02)
 
@@ -97,7 +91,7 @@ class PairedTrainTransform:
             h,
             w,
             size=(self.cfg.img_size, self.cfg.img_size),
-            interpolation=transforms.InterpolationMode.NEAREST,
+            interpolation=transforms.InterpolationMode.BICUBIC,
         )
         moire = TF.resized_crop(
             moire,
@@ -106,7 +100,7 @@ class PairedTrainTransform:
             h,
             w,
             size=(self.cfg.img_size, self.cfg.img_size),
-            interpolation=transforms.InterpolationMode.NEAREST,
+            interpolation=transforms.InterpolationMode.BICUBIC,
         )
         if random.random() < 0.5:
             clean = TF.hflip(clean)
