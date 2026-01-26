@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pt
+*.pth
+*.ckpt
+*.onnx
+runs/
+train/
+validate/
+商户图片测试/
