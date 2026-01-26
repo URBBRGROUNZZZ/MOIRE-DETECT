@@ -29,7 +29,7 @@ def _ifftshift2(x: torch.Tensor) -> torch.Tensor:
 
 def _build_highpass_mask(h: int, w: int, low_freq_ratio: float) -> torch.Tensor:
     low_freq_ratio = max(0.0, min(float(low_freq_ratio), 1.0))
-    yy, xx = torch.meshgrid(torch.arange(h), torch.arange(w))
+    yy, xx = torch.meshgrid(torch.arange(h), torch.arange(w), indexing="ij")
     cy = h // 2
     cx = w // 2
     radius = torch.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
@@ -326,7 +326,8 @@ class ViTFFTClassifier(nn.Module):
                 n_patches = int(feats.shape[1] - 1)
                 grid = int(math.sqrt(n_patches))
                 if grid * grid == n_patches:
-                    attn = F.adaptive_avg_pool2d(freq_attn_map, (grid, grid))
+                    # Use interpolate to avoid MPS adaptive pool divisibility constraints.
+                    attn = F.interpolate(freq_attn_map, size=(grid, grid), mode="bilinear", align_corners=False)
                     weights = attn.flatten(1)
                     weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-6)
                     patch_tokens = feats[:, 1:]
