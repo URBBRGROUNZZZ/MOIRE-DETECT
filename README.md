@@ -71,6 +71,78 @@ python3.10 -m venv .venv
   --save-dir runs/exp1
 ```
 
+### 成对训练（paired）
+
+成对训练要求文件名匹配规则（仅 PNG）：
+
+```
+train/0/<base>.png
+train/1/<base>__vXX__pattern_..._moire.png
+```
+
+示例：
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --train-mode paired \
+  --model deit_small_patch16_224 --img-size 224 --freq-size 128 \
+  --val-tile-reduce topk_mean --val-tile-topk 5 \
+  --save-dir runs/exp_vit_paired_freqattn
+```
+
+### Swin（本地权重）训练
+
+若网络访问 HuggingFace 超时，可先手动下载 `pytorch_model.bin`，然后用 `--no-pretrained --init-ckpt`：
+
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --train-mode paired \
+  --model swin_tiny_patch4_window7_224 --img-size 224 --freq-size 128 \
+  --no-pretrained \
+  --init-ckpt /Users/karl/Downloads/pytorch_model.bin \
+  --val-tile-reduce topk_mean --val-tile-topk 5 \
+  --save-dir runs/exp_swin_paired_freqattn
+```
+
+### 常用模型与尺寸示例
+
+ViT (224):
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --model deit_small_patch16_224 --img-size 224 --freq-size 128 \
+  --save-dir runs/exp_vit224
+```
+
+ViT (384):
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --model deit_small_patch16_384 --img-size 384 --freq-size 192 \
+  --val-window-sizes 384,512,640 \
+  --save-dir runs/exp_vit384
+```
+
+Swin-T (224):
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --model swin_tiny_patch4_window7_224 --img-size 224 --freq-size 128 \
+  --save-dir runs/exp_swin_tiny
+```
+
+### 关键配置项速查
+
+- `--model`: timm 模型名（如 `deit_small_patch16_224` / `swin_tiny_patch4_window7_224`）
+- `--img-size`: 输入尺寸；ViT/Swin 需是 patch size 的整数倍
+- `--freq-size`/`--freq-dim`: 频域分支尺寸与通道
+- `--freq-attn*`: 频域引导注意力开关与强度（默认开启）
+- `--val-window-sizes`: tiled 验证的窗口大小列表
+- `--val-tile-reduce`: tile 聚合方式（`max`/`mean`/`topk_mean`/`p95`）
+- `--val-tile-topk`: `topk_mean` 的 k
+- `--no-pretrained --init-ckpt`: 使用本地权重（避免下载）
+
 ## 4) 在 validate 上做多尺度切片推理验证
 
 ```sh

@@ -30,9 +30,42 @@ Train (saves to `runs/exp1/`):
 .venv/bin/python -m moire.train --train-dir train --val-dir validate --save-dir runs/exp1
 ```
 
+Train (paired + freq-attn + topk aggregation):
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --train-mode paired \
+  --model deit_small_patch16_224 --img-size 224 --freq-size 128 \
+  --val-tile-reduce topk_mean --val-tile-topk 5 \
+  --save-dir runs/exp_vit_paired_freqattn
+```
+
+Train (Swin-T with local weights):
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --train-mode paired \
+  --model swin_tiny_patch4_window7_224 --img-size 224 --freq-size 128 \
+  --no-pretrained \
+  --init-ckpt /Users/karl/Downloads/pytorch_model.bin \
+  --val-tile-reduce topk_mean --val-tile-topk 5 \
+  --save-dir runs/exp_swin_paired_freqattn
+```
+
 Validate with multi-window tiling:
 ```sh
 .venv/bin/python -m moire.infer_validate --val-dir validate --ckpt runs/exp1/best.pt --window-sizes 224,320,448,512
+```
+
+Infer on any folder (with top-k aggregation):
+```sh
+.venv/bin/python -m moire.infer_folder --input-dir "商户图片测试" --ckpt runs/exp1/best.pt --window-sizes 224,320,448,512 --tile-reduce topk_mean --tile-topk 5
+```
+
+Paired training expects:
+```
+train/0/<base>.png
+train/1/<base>__vXX__pattern_..._moire.png
 ```
 
 ## Coding Style & Naming Conventions
@@ -51,4 +84,3 @@ Validate with multi-window tiling:
 
 - This folder may not be initialized as a Git repo. If you add Git, use clear messages (e.g., Conventional Commits: `feat: ...`, `fix: ...`).
 - PRs (if used) should include: what changed, how to run, and relevant metrics/output paths (e.g., `runs/expX/best_metrics.json`).
-
