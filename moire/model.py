@@ -213,6 +213,7 @@ class ViTFFTClassifier(nn.Module):
         vit_dim = getattr(self.vit, "num_features", None)
         if vit_dim is None:
             raise RuntimeError(f"Unable to infer feature dim for model {cfg.model_name}")
+        self.vit_dim = int(vit_dim)
 
         self.freq_branch = FFTBranch(cfg.freq_dim)
         self.freq_attn_enabled = bool(cfg.freq_attn_enabled)
@@ -272,10 +273,10 @@ class ViTFFTClassifier(nn.Module):
             self.gabor_scale = nn.Parameter(torch.tensor(float(cfg.gabor_scale_init), dtype=torch.float32))
 
         self.fusion = nn.Sequential(
-            nn.Linear(vit_dim + cfg.freq_dim, vit_dim),
+            nn.Linear(int(vit_dim) + cfg.freq_dim, int(vit_dim)),
             nn.GELU(),
             nn.Dropout(p=0.2),
-            nn.Linear(vit_dim, cfg.num_classes),
+            nn.Linear(int(vit_dim), cfg.num_classes),
         )
 
     def _denormalize_to_unit(self, x_norm: torch.Tensor) -> torch.Tensor:
@@ -344,12 +345,28 @@ class ViTFFTClassifier(nn.Module):
             # tokens [B, N, C] -> CLS
             return feats[:, 0]
         if getattr(feats, "ndim", 0) == 4:
+            if feats.shape[1] == self.vit_dim:
+                # NCHW feature map [B,C,H,W].
+                if freq_attn_map is not None:
+                    attn = F.interpolate(
+                        freq_attn_map, size=feats.shape[-2:], mode="bilinear", align_corners=False
+                    )
+                    feats = feats * (1.0 + self.freq_attn_scale * attn)
+                return feats.mean(dim=(-2, -1))
+            if feats.shape[-1] == self.vit_dim:
+                # NHWC feature map [B,H,W,C] (e.g., some Swin variants).
+                if freq_attn_map is not None:
+                    attn = F.interpolate(
+                        freq_attn_map, size=feats.shape[1:3], mode="bilinear", align_corners=False
+                    )
+                    feats = feats * (1.0 + self.freq_attn_scale * attn.permute(0, 2, 3, 1))
+                return feats.mean(dim=(1, 2))
+            # Fallback: treat as NCHW.
             if freq_attn_map is not None:
                 attn = F.interpolate(
                     freq_attn_map, size=feats.shape[-2:], mode="bilinear", align_corners=False
                 )
                 feats = feats * (1.0 + self.freq_attn_scale * attn)
-            # CNN feature map [B,C,H,W] -> global average pool.
             return feats.mean(dim=(-2, -1))
         return feats  # already [B,C] for many timm models
 
