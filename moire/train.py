@@ -186,6 +186,29 @@ def limit_loader(loader: DataLoader, limit: int, shuffle: bool, seed: int) -> Da
     )
 
 
+def _is_timm_backbone_state_dict(sd: object) -> bool:
+    if not isinstance(sd, dict):
+        return False
+    keys = list(sd.keys())
+    if not keys:
+        return False
+    if any(
+        k.startswith(prefix)
+        for prefix in (
+            "vit.",
+            "freq_branch.",
+            "fusion.",
+            "srm.",
+            "srm_branch.",
+            "gabor.",
+            "gabor_branch.",
+        )
+        for k in keys
+    ):
+        return False
+    return any(k.startswith(("patch_embed.", "layers.", "blocks.", "norm.", "head.")) for k in keys)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-dir", type=str, default="train")
@@ -323,14 +346,26 @@ def main() -> None:
     if args.init_ckpt:
         ckpt = load_checkpoint(args.init_ckpt, map_location="cpu")
         sd = ckpt.get("state_dict", ckpt)
-        missing, unexpected = model.load_state_dict(sd, strict=False)
-        print(
-            {
-                "init_ckpt": str(args.init_ckpt),
-                "missing_keys": len(missing),
-                "unexpected_keys": len(unexpected),
-            }
-        )
+        if _is_timm_backbone_state_dict(sd):
+            missing, unexpected = model.vit.load_state_dict(sd, strict=False)
+            print(
+                {
+                    "init_ckpt": str(args.init_ckpt),
+                    "target": "vit_backbone",
+                    "missing_keys": len(missing),
+                    "unexpected_keys": len(unexpected),
+                }
+            )
+        else:
+            missing, unexpected = model.load_state_dict(sd, strict=False)
+            print(
+                {
+                    "init_ckpt": str(args.init_ckpt),
+                    "target": "full_model",
+                    "missing_keys": len(missing),
+                    "unexpected_keys": len(unexpected),
+                }
+            )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss()

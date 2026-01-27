@@ -51,6 +51,7 @@ Train (Swin-T with local weights):
   --val-tile-reduce topk_mean --val-tile-topk 5 \
   --save-dir runs/exp_swin_paired_freqattn
 ```
+Note: `--init-ckpt` auto-detects timm backbone weights and loads only the backbone.
 
 Validate with multi-window tiling:
 ```sh

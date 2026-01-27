@@ -105,6 +105,8 @@ train/1/<base>__vXX__pattern_..._moire.png
   --save-dir runs/exp_swin_paired_freqattn
 ```
 
+`--init-ckpt` 会自动识别 timm backbone 权重并只加载到主干，避免与自定义分支冲突。
+
 ### 常用模型与尺寸示例
 
 ViT (224):
