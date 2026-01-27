@@ -31,6 +31,7 @@ def main() -> None:
     ap.add_argument("--stride-ratio", type=float, default=0.5)
     ap.add_argument("--tile-reduce", type=str, default="max", choices=["max", "mean", "topk_mean", "p95"])
     ap.add_argument("--tile-topk", type=int, default=5)
+    ap.add_argument("--freq-attn-scale", type=float, default=None)
     ap.add_argument("--threshold", type=float, default=0.5, help="classification threshold for metrics")
     ap.add_argument(
         "--early-stop-threshold",
@@ -80,6 +81,11 @@ def main() -> None:
     model = ViTFFTClassifier(model_cfg)
     model.load_state_dict(ckpt["state_dict"], strict=True)
     model.to(device)
+    if args.freq_attn_scale is not None and hasattr(model, "freq_attn_scale"):
+        with torch.no_grad():
+            model.freq_attn_scale.copy_(
+                torch.tensor(float(args.freq_attn_scale), dtype=model.freq_attn_scale.dtype, device=device)
+            )
     model.eval()
 
     tfm = build_eval_transform(model_cfg.img_size, mean=model_cfg.mean, std=model_cfg.std)
