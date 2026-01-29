@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -209,6 +210,33 @@ def _is_timm_backbone_state_dict(sd: object) -> bool:
     return any(k.startswith(("patch_embed.", "layers.", "blocks.", "norm.", "head.")) for k in keys)
 
 
+def _adapt_input_conv_weight(weight: torch.Tensor, in_chans: int) -> torch.Tensor:
+    if weight.ndim != 4:
+        return weight
+    out_ch, in_ch, k1, k2 = weight.shape
+    if in_ch == in_chans:
+        return weight
+    if in_chans < in_ch:
+        return weight[:, :in_chans, :, :]
+    repeat = int(math.ceil(in_chans / in_ch))
+    w = weight.repeat(1, repeat, 1, 1)[:, :in_chans, :, :]
+    return w * (in_ch / float(in_chans))
+
+
+def _adapt_state_dict_in_chans(sd: dict, in_chans: int) -> dict:
+    if int(in_chans) == 3:
+        return sd
+    out = dict(sd)
+    for k, v in sd.items():
+        if not isinstance(v, torch.Tensor):
+            continue
+        if v.ndim != 4 or v.shape[1] != 3:
+            continue
+        if "patch_embed" in k or k.endswith("conv1.weight") or "stem" in k:
+            out[k] = _adapt_input_conv_weight(v, int(in_chans))
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-dir", type=str, default="train")
@@ -235,6 +263,11 @@ def main() -> None:
     ap.add_argument("--no-freq-attn", dest="freq_attn_enabled", action="store_false")
     ap.add_argument("--freq-attn-low-freq-ratio", type=float, default=0.2)
     ap.add_argument("--freq-attn-scale-init", type=float, default=0.1)
+    ap.add_argument("--input-highpass", dest="input_highpass_enabled", action="store_true", default=False)
+    ap.add_argument("--no-input-highpass", dest="input_highpass_enabled", action="store_false")
+    ap.add_argument("--input-highpass-ksize", type=int, default=7)
+    ap.add_argument("--input-highpass-sigma", type=float, default=1.5)
+    ap.add_argument("--input-highpass-scale-init", type=float, default=1.0)
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--num-workers", type=int, default=0)
@@ -340,12 +373,17 @@ def main() -> None:
         freq_attn_enabled=bool(args.freq_attn_enabled),
         freq_attn_low_freq_ratio=float(args.freq_attn_low_freq_ratio),
         freq_attn_scale_init=float(args.freq_attn_scale_init),
+        input_highpass_enabled=bool(args.input_highpass_enabled),
+        input_highpass_ksize=int(args.input_highpass_ksize),
+        input_highpass_sigma=float(args.input_highpass_sigma),
+        input_highpass_scale_init=float(args.input_highpass_scale_init),
     )
     model = ViTFFTClassifier(model_cfg).to(device)
 
     if args.init_ckpt:
         ckpt = load_checkpoint(args.init_ckpt, map_location="cpu")
         sd = ckpt.get("state_dict", ckpt)
+        sd = _adapt_state_dict_in_chans(sd, getattr(model, "in_chans", 3))
         if _is_timm_backbone_state_dict(sd):
             missing, unexpected = model.vit.load_state_dict(sd, strict=False)
             print(
@@ -393,6 +431,12 @@ def main() -> None:
         freq_attn_enabled=bool(model_cfg.freq_attn_enabled),
         freq_attn_low_freq_ratio=float(model_cfg.freq_attn_low_freq_ratio),
         freq_attn_scale_init=float(model_cfg.freq_attn_scale_init),
+        input_highpass_enabled=bool(model_cfg.input_highpass_enabled),
+        input_highpass_ksize=int(model_cfg.input_highpass_ksize) if model_cfg.input_highpass_enabled else 0,
+        input_highpass_sigma=float(model_cfg.input_highpass_sigma) if model_cfg.input_highpass_enabled else 0.0,
+        input_highpass_scale_init=float(model_cfg.input_highpass_scale_init)
+        if model_cfg.input_highpass_enabled
+        else 0.0,
     )
     write_json(save_dir / "config.json", {"train": vars(args), "model": asdict(model_cfg), "data": asdict(data_cfg)})
 

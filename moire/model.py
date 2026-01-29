@@ -37,6 +37,19 @@ def _build_highpass_mask(h: int, w: int, low_freq_ratio: float) -> torch.Tensor:
     return (radius >= cutoff).to(dtype=torch.float32)
 
 
+def _build_gaussian_kernel(ksize: int, sigma: float) -> torch.Tensor:
+    ksize = max(int(ksize), 1)
+    if ksize % 2 == 0:
+        ksize += 1
+    sigma = max(float(sigma), 1e-6)
+    half = ksize // 2
+    axis = torch.arange(-half, half + 1, dtype=torch.float32)
+    yy, xx = torch.meshgrid(axis, axis, indexing="ij")
+    kernel = torch.exp(-(xx**2 + yy**2) / (2.0 * sigma**2))
+    kernel = kernel / kernel.sum()
+    return kernel
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     model_name: str = "deit_small_patch16_224"
@@ -64,6 +77,11 @@ class ModelConfig:
     freq_attn_enabled: bool = True
     freq_attn_low_freq_ratio: float = 0.2
     freq_attn_scale_init: float = 0.1
+    # Input high-pass concat (optional).
+    input_highpass_enabled: bool = False
+    input_highpass_ksize: int = 7
+    input_highpass_sigma: float = 1.5
+    input_highpass_scale_init: float = 1.0
 
 
 class FFTBranch(nn.Module):
@@ -198,6 +216,8 @@ class ViTFFTClassifier(nn.Module):
             raise RuntimeError("timm is required. Please `pip install timm`.")
 
         self.cfg = cfg
+        self.input_highpass_enabled = bool(cfg.input_highpass_enabled)
+        self.in_chans = 6 if self.input_highpass_enabled else 3
         mean = torch.tensor(cfg.mean, dtype=torch.float32).view(1, 3, 1, 1)
         std = torch.tensor(cfg.std, dtype=torch.float32).view(1, 3, 1, 1)
         self.register_buffer("mean", mean, persistent=False)
@@ -206,14 +226,28 @@ class ViTFFTClassifier(nn.Module):
         # num_classes=0 -> return features for most timm models.
         # Keep attribute name `vit` for backward-compatible checkpoints (older runs used ViT backbones).
         try:
-            self.vit = timm.create_model(cfg.model_name, pretrained=cfg.pretrained, num_classes=0)
+            self.vit = timm.create_model(
+                cfg.model_name, pretrained=cfg.pretrained, num_classes=0, in_chans=self.in_chans
+            )
         except Exception:
-            self.vit = timm.create_model(cfg.model_name, pretrained=False, num_classes=0)
+            self.vit = timm.create_model(cfg.model_name, pretrained=False, num_classes=0, in_chans=self.in_chans)
 
         vit_dim = getattr(self.vit, "num_features", None)
         if vit_dim is None:
             raise RuntimeError(f"Unable to infer feature dim for model {cfg.model_name}")
         self.vit_dim = int(vit_dim)
+
+        if self.input_highpass_enabled:
+            ksize = max(int(cfg.input_highpass_ksize), 1)
+            if ksize % 2 == 0:
+                ksize += 1
+            kernel = _build_gaussian_kernel(ksize=ksize, sigma=float(cfg.input_highpass_sigma))
+            w = kernel[None, None, :, :].repeat(3, 1, 1, 1)
+            self.register_buffer("input_highpass_kernel", w, persistent=False)
+            self.input_highpass_pad = int(ksize) // 2
+            self.input_highpass_scale = nn.Parameter(
+                torch.tensor(float(cfg.input_highpass_scale_init), dtype=torch.float32)
+            )
 
         self.freq_branch = FFTBranch(cfg.freq_dim)
         self.freq_attn_enabled = bool(cfg.freq_attn_enabled)
@@ -314,6 +348,16 @@ class ViTFFTClassifier(nn.Module):
         attn = attn / (attn.amax(dim=(-2, -1), keepdim=True) + 1e-6)
         return attn
 
+    def _compute_input_highpass(self, x_norm: torch.Tensor) -> torch.Tensor:
+        blur = F.conv2d(
+            x_norm,
+            self.input_highpass_kernel,
+            padding=self.input_highpass_pad,
+            groups=3,
+        )
+        high = x_norm - blur
+        return high * self.input_highpass_scale
+
     def _vit_features(self, x: torch.Tensor, freq_attn_map: torch.Tensor | None = None) -> torch.Tensor:
         """
         Return a [B,C] feature vector for both ViT-like backbones (token outputs) and CNN backbones
@@ -372,7 +416,12 @@ class ViTFFTClassifier(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         freq_attn_map = self._compute_freq_attn_map(x) if self.freq_attn_enabled else None
-        vit_feat = self._vit_features(x, freq_attn_map=freq_attn_map)
+        if self.input_highpass_enabled:
+            high = self._compute_input_highpass(x)
+            x_in = torch.cat([x, high], dim=1)
+        else:
+            x_in = x
+        vit_feat = self._vit_features(x_in, freq_attn_map=freq_attn_map)
         x_unit = None
         if self.srm_enabled or self.gabor_enabled:
             x_unit = self._denormalize_to_unit(x)

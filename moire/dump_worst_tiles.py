@@ -171,6 +171,10 @@ def main() -> None:
         freq_attn_enabled=bool(meta.get("freq_attn_enabled", False)),
         freq_attn_low_freq_ratio=float(meta.get("freq_attn_low_freq_ratio", 0.0) or 0.0),
         freq_attn_scale_init=float(meta.get("freq_attn_scale_init", 0.0) or 0.0),
+        input_highpass_enabled=bool(meta.get("input_highpass_enabled", False)),
+        input_highpass_ksize=int(meta.get("input_highpass_ksize", 0) or 0),
+        input_highpass_sigma=float(meta.get("input_highpass_sigma", 0.0) or 0.0),
+        input_highpass_scale_init=float(meta.get("input_highpass_scale_init", 0.0) or 0.0),
     )
     model = ViTFFTClassifier(model_cfg)
     model.load_state_dict(ckpt["state_dict"], strict=True)

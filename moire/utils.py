@@ -58,6 +58,10 @@ class CheckpointMeta:
     freq_attn_enabled: bool = False
     freq_attn_low_freq_ratio: float = 0.0
     freq_attn_scale_init: float = 0.0
+    input_highpass_enabled: bool = False
+    input_highpass_ksize: int = 0
+    input_highpass_sigma: float = 0.0
+    input_highpass_scale_init: float = 0.0
 
 
 def save_checkpoint(
