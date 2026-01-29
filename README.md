@@ -107,6 +107,18 @@ train/1/<base>__vXX__pattern_..._moire.png
 
 `--init-ckpt` 会自动识别 timm backbone 权重并只加载到主干，避免与自定义分支冲突。
 
+### SwinV2-Base (256)
+
+```sh
+.venv/bin/python -m moire.train \
+  --train-dir train --val-dir validate \
+  --train-mode paired \
+  --model swinv2_base_window8_256 --img-size 256 --freq-size 128 \
+  --val-tile-reduce topk_mean --val-tile-topk 5 \
+  --batch-size 8 --num-workers 4 --device cuda \
+  --save-dir runs/exp_swinv2_base_paired_freqattn
+```
+
 ### 常用模型与尺寸示例
 
 ViT (224):
